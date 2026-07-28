@@ -1,0 +1,12 @@
+# L'import VBA MicroStation exige des fins de ligne Windows (CRLF)
+# sinon les .cls sont importes comme modules standard
+*.bas text eol=crlf
+*.cls text eol=crlf
+*.frm text eol=crlf
+# Blob designer binaire des UserForms (genere par l'editeur VBA, jamais editer)
+*.frx binary
+*.ps1 text eol=crlf
+*.html text
+*.dgn binary
+*.dgnlib binary
+*.mvba binary
