@@ -24,6 +24,7 @@ Private m_bConstruit    As Boolean
 Private m_bInit         As Boolean
 Private m_oSettings     As CSettings
 Private m_bClicDejaTraite As Boolean   ' voir lstApercu_Click / lstApercu_MouseUp
+Private m_bBasculeEnCours As Boolean   ' voir BasculerLigneCourante (garde de reentrance)
 
 ' --- Controles declares WithEvents pour recevoir les evenements ---
 Private WithEvents optAttachement   As MSForms.OptionButton
@@ -164,6 +165,23 @@ Private Sub RemplirApercu(ByVal oMoteur As CMoteurUniformisation)
     For Each oItem In oMoteur.Items
         lstApercu.AddItem LigneApercu(oItem)
     Next oItem
+
+    ' [PIEGE confirme 2026-07-28] IntegralHeight=False (ConstruireControles)
+    ' et le reset de TopIndex ci-dessous ne suffisent pas seuls : la
+    ' derniere ligne reelle restait inaccessible au scroll (bug
+    ' MSForms.ListBox connu : la scrollbar compte une ligne partiellement
+    ' visible en bas comme "affichee", ce qui empeche la vraie derniere
+    ' ligne d'atteindre le haut de cette portion partielle). Palliatif
+    ' confirme : ajouter une ligne vide sacrificielle en fin de liste, qui
+    ' absorbe ce rognage a la place d'une ligne reelle. BasculerLigneCourante
+    ' ignore les clics sur cette ligne (index hors plage des Items). Voir KB
+    ' 03_Formulaires.md section 3.10.
+    lstApercu.AddItem ""
+
+    If lstApercu.ListCount > 0 Then
+        lstApercu.TopIndex = lstApercu.ListCount - 1
+        lstApercu.TopIndex = 0
+    End If
 End Sub
 
 Private Function LigneApercu(ByVal oItem As CItemUniformisation) As String
@@ -342,19 +360,34 @@ Private Sub lstApercu_MouseUp(ByVal Button As Integer, ByVal Shift As Integer, B
     BasculerLigneCourante
 End Sub
 
+' [PIEGE confirme 2026-07-28] Dans cet hote VBA, ecrire dans lstApercu.List(i)
+' et/ou lstApercu.ListIndex REDECLENCHE de facon synchrone et recursive
+' lstApercu_Click (constate au runtime : ~10 repaints en rafale au clic, et
+' Inclus qui finit par revenir a sa valeur de depart -- nombre pair de
+' basculements en cascade). m_bBasculeEnCours coupe la reentrance : le
+' deuxieme appel (et tous les suivants, en cascade) sort immediatement sans
+' toucher a oItem ni au controle, donc un seul basculement reel a lieu.
 Private Sub BasculerLigneCourante()
     Dim oItem As CItemUniformisation
     Dim nSel As Long
 
-    If g_oMoteur Is Nothing Then Exit Sub
+    If m_bBasculeEnCours Then Exit Sub
+    m_bBasculeEnCours = True
+
+    If g_oMoteur Is Nothing Then GoTo Fin
     nSel = lstApercu.ListIndex
-    If nSel < 0 Then Exit Sub
+    ' nSel = ListCount-1 : ligne vide sacrificielle ajoutee par RemplirApercu
+    ' (contournement scroll), pas un CItemUniformisation -> ignorer le clic.
+    If nSel < 0 Or nSel >= g_oMoteur.Items.Count Then GoTo Fin
 
     Set oItem = g_oMoteur.Items(nSel + 1)
     oItem.Inclus = Not oItem.Inclus
 
     lstApercu.List(nSel) = LigneApercu(oItem)
     lstApercu.ListIndex = nSel
+
+Fin:
+    m_bBasculeEnCours = False
 End Sub
 
 ' =============================================================================
