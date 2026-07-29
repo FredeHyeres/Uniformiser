@@ -278,6 +278,10 @@ Private Function ComparerStylesTexte(ByVal oSrc As TextStyle, ByVal oDst As Text
     Dim sFontDst As String
     Dim dHauteurSrc As Double
     Dim dLargeurSrc As Double
+    Dim dMargeXSrc As Double
+    Dim dMargeYSrc As Double
+    Dim sStyleBordureSrc As String
+    Dim sStyleBordureDst As String
 
     sFontSrc = "": sFontDst = ""
     On Error Resume Next
@@ -306,6 +310,38 @@ Private Function ComparerStylesTexte(ByVal oSrc As TextStyle, ByVal oDst As Text
     If oSrc.IsBold <> oDst.IsBold Then sDiffs = sDiffs & "Gras modifie; "
     If oSrc.IsItalic <> oDst.IsItalic Then sDiffs = sDiffs & "Italique modifie; "
     If oSrc.IsUnderlined <> oDst.IsUnderlined Then sDiffs = sDiffs & "Souligne modifie; "
+
+    ' Fond (background) et bordure : proprietes distinctes de Color/Height
+    ' (voir KB_INDEX -> TextStyle Object -> Background*/Border*), absentes
+    ' de la comparaison initiale ce qui les faisait passer pour "identiques"
+    ' meme quand elles n'avaient jamais ete copiees.
+    On Error Resume Next
+    If oSrc.BorderAndBackgroundVisible <> oDst.BorderAndBackgroundVisible Then
+        sDiffs = sDiffs & "Fond/bordure visible modifie; "
+    End If
+    If oSrc.BackgroundFillColor <> oDst.BackgroundFillColor Then
+        sDiffs = sDiffs & "Couleur de fond " & oDst.BackgroundFillColor & " -> " & oSrc.BackgroundFillColor & "; "
+    End If
+    If oSrc.BorderColor <> oDst.BorderColor Then
+        sDiffs = sDiffs & "Couleur de bordure " & oDst.BorderColor & " -> " & oSrc.BorderColor & "; "
+    End If
+    If oSrc.BorderLineWeight <> oDst.BorderLineWeight Then
+        sDiffs = sDiffs & "Epaisseur de bordure " & oDst.BorderLineWeight & " -> " & oSrc.BorderLineWeight & "; "
+    End If
+
+    sStyleBordureSrc = "": sStyleBordureDst = ""
+    sStyleBordureSrc = oSrc.BorderLineStyle.Name
+    sStyleBordureDst = oDst.BorderLineStyle.Name
+    If sStyleBordureSrc <> sStyleBordureDst Then
+        sDiffs = sDiffs & "Style de bordure " & sStyleBordureDst & " -> " & sStyleBordureSrc & "; "
+    End If
+
+    dMargeXSrc = oSrc.BorderMargins.X * dRatioUor
+    dMargeYSrc = oSrc.BorderMargins.Y * dRatioUor
+    If Abs(dMargeXSrc - oDst.BorderMargins.X) > 0.0001 Or Abs(dMargeYSrc - oDst.BorderMargins.Y) > 0.0001 Then
+        sDiffs = sDiffs & "Marges de bordure modifiees; "
+    End If
+    On Error GoTo 0
 
     ComparerStylesTexte = sDiffs
 End Function
@@ -471,6 +507,9 @@ End Sub
 ' UORsPerMasterUnit de l'actif (10 000) -- ca casse des que ce n'est pas
 ' le cas (Test_REF.dgn). Formule generale : voir RatioUorMasterUnit.
 Private Sub CopierProprietesStyleTexte(ByVal oSrc As TextStyle, ByVal oDst As TextStyle, ByVal dfActif As DesignFile, ByVal dRatioUor As Double)
+    Dim sNomStyleBordure As String
+    Dim ptMarges As Point2d
+
     On Error Resume Next
 
     Set oDst.Font = oSrc.Font
@@ -482,6 +521,26 @@ Private Sub CopierProprietesStyleTexte(ByVal oSrc As TextStyle, ByVal oDst As Te
     oDst.IsBold = oSrc.IsBold
     oDst.IsItalic = oSrc.IsItalic
     oDst.IsUnderlined = oSrc.IsUnderlined
+
+    ' Fond (background) et bordure. BorderLineStyle est une reference
+    ' nommee : meme limitation que ElementLineStyle sur les niveaux
+    ' (AppliquerNiveaux) -- si le style de ligne source est un style
+    ' personnalise absent du fichier actif, la resolution par nom echoue
+    ' silencieusement (perimetre v1, styles de ligne perso exclus).
+    oDst.BorderAndBackgroundVisible = oSrc.BorderAndBackgroundVisible
+    oDst.BackgroundFillColor = oSrc.BackgroundFillColor
+    oDst.BorderColor = oSrc.BorderColor
+    oDst.BorderLineWeight = oSrc.BorderLineWeight
+
+    sNomStyleBordure = ""
+    sNomStyleBordure = oSrc.BorderLineStyle.Name
+    If Len(sNomStyleBordure) > 0 Then
+        Set oDst.BorderLineStyle = dfActif.LineStyles(sNomStyleBordure)
+    End If
+
+    ptMarges.X = oSrc.BorderMargins.X * dRatioUor
+    ptMarges.Y = oSrc.BorderMargins.Y * dRatioUor
+    oDst.BorderMargins = ptMarges
 
     On Error GoTo 0
 End Sub
