@@ -229,12 +229,16 @@ End Function
 Private Function AnalyserStylesTexte(ByVal dfSource As DesignFile, ByVal dfActif As DesignFile) As Collection
     Dim colRes As New Collection
     Dim oModelSrc As ModelReference
+    Dim oModelActif As ModelReference
+    Dim dRatioUor As Double
     Dim oStySrc As TextStyle
     Dim oStyDst As TextStyle
     Dim oItem As CItemUniformisation
     Dim sDetail As String
 
     Set oModelSrc = dfSource.DefaultModelReference
+    Set oModelActif = dfActif.DefaultModelReference
+    dRatioUor = RatioUorMasterUnit(oModelActif, oModelSrc)
 
     For Each oStySrc In dfSource.TextStyles
         Set oStyDst = Nothing
@@ -251,7 +255,7 @@ Private Function AnalyserStylesTexte(ByVal dfSource As DesignFile, ByVal dfActif
             oItem.Etat = eUniNouveau
             oItem.Inclus = True
         Else
-            sDetail = ComparerStylesTexte(oStySrc, oStyDst, oModelSrc)
+            sDetail = ComparerStylesTexte(oStySrc, oStyDst, dRatioUor)
             If Len(sDetail) = 0 Then
                 oItem.Etat = eUniIdentique
                 oItem.Inclus = False
@@ -268,7 +272,7 @@ Private Function AnalyserStylesTexte(ByVal dfSource As DesignFile, ByVal dfActif
     Set AnalyserStylesTexte = colRes
 End Function
 
-Private Function ComparerStylesTexte(ByVal oSrc As TextStyle, ByVal oDst As TextStyle, ByVal oModelSrc As ModelReference) As String
+Private Function ComparerStylesTexte(ByVal oSrc As TextStyle, ByVal oDst As TextStyle, ByVal dRatioUor As Double) As String
     Dim sDiffs As String
     Dim sFontSrc As String
     Dim sFontDst As String
@@ -284,8 +288,8 @@ Private Function ComparerStylesTexte(ByVal oSrc As TextStyle, ByVal oDst As Text
         sDiffs = sDiffs & "Police " & sFontDst & " -> " & sFontSrc & "; "
     End If
 
-    dHauteurSrc = TailleReelleSource(oSrc.Height, oModelSrc)
-    dLargeurSrc = TailleReelleSource(oSrc.Width, oModelSrc)
+    dHauteurSrc = oSrc.Height * dRatioUor
+    dLargeurSrc = oSrc.Width * dRatioUor
 
     If Abs(dHauteurSrc - oDst.Height) > 0.0001 Then
         sDiffs = sDiffs & "Hauteur " & Format$(oDst.Height, "0.####") & " -> " & Format$(dHauteurSrc, "0.####") & "; "
@@ -411,9 +415,13 @@ Private Sub AppliquerStylesTexte(ByVal dfActif As DesignFile)
     Dim oStySrc As TextStyle
     Dim oStyDst As TextStyle
     Dim oModelSrc As ModelReference
+    Dim oModelActif As ModelReference
+    Dim dRatioUor As Double
 
     If m_dfSource Is Nothing Then Exit Sub
     Set oModelSrc = m_dfSource.DefaultModelReference
+    Set oModelActif = dfActif.DefaultModelReference
+    dRatioUor = RatioUorMasterUnit(oModelActif, oModelSrc)
 
     For Each oItem In m_colItems
         If oItem.Categorie = "Styles de texte" And oItem.Inclus Then
@@ -432,7 +440,7 @@ Private Sub AppliquerStylesTexte(ByVal dfActif As DesignFile)
             End Select
 
             If Not oStyDst Is Nothing Then
-                CopierProprietesStyleTexte oStySrc, oStyDst, dfActif, oModelSrc
+                CopierProprietesStyleTexte oStySrc, oStyDst, dfActif, dRatioUor
             End If
         End If
     Next oItem
@@ -448,13 +456,27 @@ End Sub
 ' si elle existe reellement. L'assignation directe laisse MicroStation
 ' gerer l'import/la resolution cross-fichier lui-meme (meme esprit que
 ' CopyElement pour la symbologie).
-Private Sub CopierProprietesStyleTexte(ByVal oSrc As TextStyle, ByVal oDst As TextStyle, ByVal dfActif As DesignFile, ByVal oModelSrc As ModelReference)
+' [OK confirme 2026-07-29] Height/Width lus via un DesignFile secondaire
+' sont biaises par le rapport de RESOLUTION UOR entre le modele source et
+' le modele ACTIF (pas par SubUnitsPerMasterUnit, piste abandonnee -- voir
+' KB 04_Geometrie.md #6.1b pour l'historique complet). Verifie sur 3
+' fichiers reels distincts, lecture directe MicroStation (onglet Text
+' Style, pas l'apparence d'un texte deja place qui peut avoir diverge du
+' style si celui-ci a ete redefini apres coup) :
+'   Refs blocs-2.dgn      : brut=45   UorMu src=1 000 000 actif=10 000 -> ratio 100 -> 45/100=0.45 (Text Style dialog)
+'   Test_REF.dgn           : brut=0.50 UorMu src=10 000    actif=10 000 -> ratio 1   -> 0.50 tel quel (Text Style dialog)
+'   COLAS...ROLAND.dgn     : brut=45   UorMu src=1 000 000 actif=10 000 -> ratio 100 -> 45/100=0.45 (Text Style dialog)
+' SubUnitsPerMasterUnit source (100 dans les 2 premiers cas) ne marchait
+' que par coincidence, car leur UORsPerSubUnit source (10 000) egalait le
+' UORsPerMasterUnit de l'actif (10 000) -- ca casse des que ce n'est pas
+' le cas (Test_REF.dgn). Formule generale : voir RatioUorMasterUnit.
+Private Sub CopierProprietesStyleTexte(ByVal oSrc As TextStyle, ByVal oDst As TextStyle, ByVal dfActif As DesignFile, ByVal dRatioUor As Double)
     On Error Resume Next
 
     Set oDst.Font = oSrc.Font
 
-    oDst.Height = TailleReelleSource(oSrc.Height, oModelSrc)
-    oDst.Width = TailleReelleSource(oSrc.Width, oModelSrc)
+    oDst.Height = oSrc.Height * dRatioUor
+    oDst.Width = oSrc.Width * dRatioUor
     oDst.Justification = oSrc.Justification
     oDst.Color = oSrc.Color
     oDst.IsBold = oSrc.IsBold
@@ -464,27 +486,19 @@ Private Sub CopierProprietesStyleTexte(ByVal oSrc As TextStyle, ByVal oDst As Te
     On Error GoTo 0
 End Sub
 
-' [OK confirme 2026-07-28] TextStyle.Height/.Width lus via un DesignFile
-' SECONDAIRE (Attachment.DesignFile ou OpenDesignFileForProgram) sont en
-' SOUS-UNITES du modele, pas en unites maitres -- contrairement a Point3d
-' (KB 6.1) et contrairement a une lecture sur le fichier ACTIF (fiable).
-' Verifie runtime Uniformiser : oSrc.Height=45 alors que MicroStation
-' affiche 0.45 (direct ET via reference, donc pas un artefact d'echelle de
-' reference) ; SubUnitsPerMasterUnit=100 des deux cotes -> 45/100=0.45
-' exact. Diviser par SubUnitsPerMasterUnit DU MODELE SOURCE (jamais celui
-' du fichier actif, qui n'a pas ce biais).
-Private Function TailleReelleSource(ByVal dVal As Double, ByVal oModelSrc As ModelReference) As Double
-    Dim dSubPerMu As Double
+' Rapport UORsPerMasterUnit(actif) / UORsPerMasterUnit(source), a multiplier
+' par une valeur "taille" lue via TextStyle sur un DesignFile secondaire
+' pour obtenir la vraie valeur en unites maitres. Repli sur 1 (valeur brute
+' inchangee) si indisponible, plutot que de diviser par zero.
+Private Function RatioUorMasterUnit(ByVal oModelActif As ModelReference, ByVal oModelSrc As ModelReference) As Double
+    Dim dUorMuSrc As Double
 
     On Error Resume Next
-    dSubPerMu = oModelSrc.SubUnitsPerMasterUnit
+    dUorMuSrc = oModelSrc.UORsPerMasterUnit
+    RatioUorMasterUnit = oModelActif.UORsPerMasterUnit / dUorMuSrc
     On Error GoTo 0
 
-    If dSubPerMu = 0 Then
-        TailleReelleSource = dVal
-    Else
-        TailleReelleSource = dVal / dSubPerMu
-    End If
+    If RatioUorMasterUnit = 0 Then RatioUorMasterUnit = 1
 End Function
 
 Private Sub AppliquerPalette(ByVal dfActif As DesignFile)
@@ -521,6 +535,13 @@ End Property
 
 Public Property Get SourceValide() As Boolean
     SourceValide = Not (m_dfSource Is Nothing)
+End Property
+
+' Expose le DesignFile source deja resolu (reference attachee ou fichier
+' parcouru, cf Analyser) pour les outils de diagnostic -- evite de dupliquer
+' la logique de resolution (For Each fragile, Bad modelRef, etc.).
+Public Property Get SourceDesignFile() As DesignFile
+    Set SourceDesignFile = m_dfSource
 End Property
 
 Public Property Get NbItems() As Long
